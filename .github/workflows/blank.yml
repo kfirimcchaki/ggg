@@ -1,48 +1,70 @@
-name: Build and Release
+name: Build and Release EXE
 
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
 
 jobs:
   build:
     runs-on: windows-latest
+    name: Build .NET Application
 
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
 
-    - name: Setup .NET
+    - name: Setup .NET 8.0
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: '8.0.x'
 
-    - name: Restore dependencies
+    - name: Restore NuGet dependencies
       run: dotnet restore VerseVisualBlueprintEditor.sln
+      shell: powershell
 
-    - name: Build
+    - name: Build Solution (Release)
       run: dotnet build VerseVisualBlueprintEditor.sln --configuration Release --no-restore
+      shell: powershell
 
-    - name: Test
+    - name: Run Unit Tests
       run: dotnet test VerseVisualBlueprintEditor.sln --configuration Release --no-build --verbosity normal
+      shell: powershell
 
-    - name: Publish
-      run: dotnet publish src/VerseVisualBlueprintEditor.UI/VerseVisualBlueprintEditor.UI.csproj -c Release -o ./publish
+    - name: Publish as Standalone EXE
+      run: |
+        dotnet publish src/VerseVisualBlueprintEditor.UI/VerseVisualBlueprintEditor.UI.csproj `
+          -c Release `
+          -o ./publish `
+          --self-contained `
+          -r win-x64 `
+          -p:PublishSingleFile=true `
+          -p:IncludeNativeLibrariesForSelfExtract=true `
+          -p:UseAppHost=true
+      shell: powershell
 
-    - name: Create Release
+    - name: Create Release Archive
       if: startsWith(github.ref, 'refs/tags/')
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        draft: false
-        prerelease: false
+      run: |
+        $version = "${{ github.ref }}".Replace('refs/tags/', '')
+        Compress-Archive -Path ./publish/VerseVisualBlueprintEditor.UI.exe -DestinationPath ./VerseVisualBlueprintEditor-$version.zip
+      shell: powershell
 
-    - name: Upload Artifact
+    - name: Create GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: ncipollo/release-action@v1
+      with:
+        artifacts: "./VerseVisualBlueprintEditor-*.zip,./publish/VerseVisualBlueprintEditor.UI.exe"
+        generateReleaseNotes: true
+        makeLatest: true
+
+    - name: Upload Build Artifacts
       uses: actions/upload-artifact@v3
       with:
-        name: VerseVisualBlueprintEditor
-        path: ./publish/
+        name: VerseVisualBlueprintEditor-Release
+        path: ./publish/VerseVisualBlueprintEditor.UI.exe
+        retention-days: 30
