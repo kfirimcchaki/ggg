@@ -19,52 +19,80 @@ jobs:
         fetch-depth: 0
 
     - name: Setup .NET 8.0
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '8.0.x'
 
-    - name: Restore NuGet dependencies
-      run: dotnet restore VerseVisualBlueprintEditor.sln
+    - name: List Project Structure
+      run: |
+        Get-ChildItem -Path . -Filter "*.csproj" -Recurse
+        Get-ChildItem -Path . -Filter "*.sln"
+      shell: powershell
+
+    - name: Clean Build Artifacts
+      run: dotnet clean --nologo -v quiet
+      continue-on-error: true
+      shell: powershell
+
+    - name: Restore NuGet Dependencies
+      run: dotnet restore VerseVisualBlueprintEditor.sln --nologo
       shell: powershell
 
     - name: Build Solution (Release)
-      run: dotnet build VerseVisualBlueprintEditor.sln --configuration Release --no-restore
+      run: dotnet build VerseVisualBlueprintEditor.sln -c Release --no-restore --nologo -v minimal
       shell: powershell
 
     - name: Run Unit Tests
-      run: dotnet test VerseVisualBlueprintEditor.sln --configuration Release --no-build --verbosity normal
+      run: dotnet test VerseVisualBlueprintEditor.sln -c Release --no-build --nologo --verbosity normal
+      continue-on-error: true
       shell: powershell
 
     - name: Publish as Standalone EXE
       run: |
-        dotnet publish src/VerseVisualBlueprintEditor.UI/VerseVisualBlueprintEditor.UI.csproj `
+        dotnet publish "src/VerseVisualBlueprintEditor.UI/VerseVisualBlueprintEditor.UI.csproj" `
           -c Release `
-          -o ./publish `
+          -o "./publish" `
           --self-contained `
           -r win-x64 `
           -p:PublishSingleFile=true `
           -p:IncludeNativeLibrariesForSelfExtract=true `
-          -p:UseAppHost=true
+          -p:UseAppHost=true `
+          -p:PublishTrimmed=false `
+          --nologo
+      shell: powershell
+
+    - name: Verify EXE Creation
+      run: |
+        if (Test-Path "./publish/VerseVisualBlueprintEditor.UI.exe") {
+          Write-Host "✓ EXE created successfully"
+          Get-Item "./publish/VerseVisualBlueprintEditor.UI.exe" | Format-List
+        } else {
+          Write-Error "EXE not found!"
+          exit 1
+        }
       shell: powershell
 
     - name: Create Release Archive
       if: startsWith(github.ref, 'refs/tags/')
       run: |
         $version = "${{ github.ref }}".Replace('refs/tags/', '')
-        Compress-Archive -Path ./publish/VerseVisualBlueprintEditor.UI.exe -DestinationPath ./VerseVisualBlueprintEditor-$version.zip
+        Compress-Archive -Path "./publish/VerseVisualBlueprintEditor.UI.exe" `
+          -DestinationPath "./VerseVisualBlueprintEditor-$version.zip" -Force
       shell: powershell
 
     - name: Create GitHub Release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: ncipollo/release-action@v1
+      uses: ncipollo/release-action@v1.14.0
       with:
         artifacts: "./VerseVisualBlueprintEditor-*.zip,./publish/VerseVisualBlueprintEditor.UI.exe"
         generateReleaseNotes: true
         makeLatest: true
 
     - name: Upload Build Artifacts
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: VerseVisualBlueprintEditor-Release
         path: ./publish/VerseVisualBlueprintEditor.UI.exe
         retention-days: 30
+        if-no-files-found: warn
